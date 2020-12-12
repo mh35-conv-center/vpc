@@ -1,0 +1,1620 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: VPC template
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: VPC settings
+        Parameters:
+          - VpcBaseAddr
+          - TargetZones
+          - TargetZonesNum
+      -
+        Label:
+          default: Cost settings
+        Parameters:
+          - CostTagName
+Parameters:
+  VpcBaseAddr:
+    Type: String
+    Description: VPC base address
+    AllowedPattern: '^(10\.((10)?[0-9]|1?[1-9][0-9]?|2([0-4][0-9]|5[0-5]))|172\.(1[6-9]|2[0-9]|3[01])|192\.168)\.0\.0$'
+  TargetZones:
+    Type: List<AWS::EC2::AvailabilityZone::Name>
+    Description: Availability zones to deploy
+  TargetZonesNum:
+    Type: Number
+    Description: The number of target zones
+    MinValue: 1
+    MaxValue: 9
+  CostTagName:
+    Type: String
+    Description: Cost tag name
+    Default: ''
+Mappings:
+  NetSettings:
+    '1':
+      CidrCount: 2
+      CidrBits: 15
+    '2':
+      CidrCount: 4
+      CidrBits: 14
+    '3':
+      CidrCount: 6
+      CidrBits: 13
+    '4':
+      CidrCount: 8
+      CidrBits: 13
+    '5':
+      CidrCount: 10
+      CidrBits: 12
+    '6':
+      CidrCount: 12
+      CidrBits: 12
+    '7':
+      CidrCount: 14
+      CidrBits: 12
+    '8':
+      CidrCount: 16
+      CidrBits: 12
+    '9':
+      CidrCount: 18
+      CidrBits: 11
+Conditions:
+  Has9thAZ: !Equals
+    - !Ref TargetZonesNum
+    - 9
+  Has8thAZ:
+    Fn::Or:
+      - !Condition Has9thAZ
+      - !Equals
+        - !Ref TargetZonesNum
+        - 8
+  Has7thAZ:
+    Fn::Or:
+      - !Condition Has8thAZ
+      - !Equals
+        - !Ref TargetZonesNum
+        - 7
+  Has6thAZ:
+    Fn::Or:
+      - !Condition Has7thAZ
+      - !Equals
+        - !Ref TargetZonesNum
+        - 6
+  Has5thAZ:
+    Fn::Or:
+      - !Condition Has6thAZ
+      - !Equals
+        - !Ref TargetZonesNum
+        - 5
+  Has4thAZ:
+    Fn::Or:
+      - !Condition Has5thAZ
+      - !Equals
+        - !Ref TargetZonesNum
+        - 4
+  Has3rdAZ:
+    Fn::Or:
+      - !Condition Has4thAZ
+      - !Equals
+        - !Ref TargetZonesNum
+        - 3
+  Has2ndAZ:
+    Fn::Or:
+      - !Condition Has3rdAZ
+      - !Equals
+        - !Ref TargetZonesNum
+        - 2
+  HasCostTag:
+    Fn::Not:
+      - !Equals
+        - !Ref CostTagName
+        - ''
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Join
+        - /
+        - - !Ref VpcBaseAddr
+          - 16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - VPC
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  IPv6Block:
+    Type: AWS::EC2::VPCCidrBlock
+    Properties:
+      VpcId: !Ref Vpc
+      AmazonProvidedIpv6CidrBlock: true
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - InternetGateway
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+  EgressOnlyGateway:
+    Type: AWS::EC2::EgressOnlyInternetGateway
+    Properties:
+      VpcId: !Ref Vpc
+  PublicSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 0
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 0
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 0
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      MapPublicIpOnLaunch: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PublicSubnet1
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 0
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 1
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 1
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      AssignIpv6AddressOnCreation: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateSubnet1
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PublicSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Condition: Has2ndAZ
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 1
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 2
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 2
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      MapPublicIpOnLaunch: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PublicSubnet2
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Condition: Has2ndAZ
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 1
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 3
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 3
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      AssignIpv6AddressOnCreation: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateSubnet2
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PublicSubnetAZ3:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Condition: Has3rdAZ
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 2
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 4
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 4
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      MapPublicIpOnLaunch: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PublicSubnet3
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateSubnetAZ3:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Condition: Has3rdAZ
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 2
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 5
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 5
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      AssignIpv6AddressOnCreation: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateSubnet3
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PublicSubnetAZ4:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Condition: Has4thAZ
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 3
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 6
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 6
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      MapPublicIpOnLaunch: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PublicSubnet4
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateSubnetAZ4:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Condition: Has4thAZ
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 3
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 7
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 7
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      AssignIpv6AddressOnCreation: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateSubnet4
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PublicSubnetAZ5:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Condition: Has5thAZ
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 4
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 8
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 8
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      MapPublicIpOnLaunch: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PublicSubnet5
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateSubnetAZ5:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Condition: Has5thAZ
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 4
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 9
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 9
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      AssignIpv6AddressOnCreation: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateSubnet5
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PublicSubnetAZ6:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Condition: Has6thAZ
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 5
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 10
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 10
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      MapPublicIpOnLaunch: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PublicSubnet6
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateSubnetAZ6:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Condition: Has6thAZ
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 5
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 11
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 11
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      AssignIpv6AddressOnCreation: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateSubnet6
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PublicSubnetAZ7:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Condition: Has7thAZ
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 6
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 12
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 12
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      MapPublicIpOnLaunch: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PublicSubnet7
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateSubnetAZ7:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Condition: Has7thAZ
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 6
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 13
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 13
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      AssignIpv6AddressOnCreation: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateSubnet7
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PublicSubnetAZ8:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Condition: Has8thAZ
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 7
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 14
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 14
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      MapPublicIpOnLaunch: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PublicSubnet8
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateSubnetAZ8:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Condition: Has8thAZ
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 7
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 15
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 15
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      AssignIpv6AddressOnCreation: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateSubnet8
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PublicSubnetAZ9:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Condition: Has9thAZ
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 8
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 16
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 16
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      MapPublicIpOnLaunch: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PublicSubnet9
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateSubnetAZ9:
+    Type: AWS::EC2::Subnet
+    DependsOn: IPv6Block
+    Condition: Has9thAZ
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select
+        - 8
+        - !Ref TargetZones
+      CidrBlock: !Select
+        - 17
+        - Fn::Cidr:
+          - !GetAtt Vpc.CidrBlock
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrBits
+      Ipv6CidrBlock: !Select
+        - 17
+        - Fn::Cidr:
+          - !Select
+            - 0
+            - !GetAtt Vpc.Ipv6CidrBlocks
+          - !FindInMap
+            - NetSettings
+            - !Ref TargetZonesNum
+            - CidrCount
+          - 64
+      AssignIpv6AddressOnCreation: true
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateSubnet9
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn: IPv6Block
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PublicRouteTable
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PublicRouteIPv4:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref PublicRouteTable
+  PublicRouteIPv6:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationIpv6CidrBlock: '::/0'
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref PublicRouteTable
+  RouteTableAttachPublicSubnet1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetAZ1
+  RouteTableAttachPublicSubnet2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Has2ndAZ
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetAZ2
+  RouteTableAttachPublicSubnet3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Has3rdAZ
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetAZ3
+  RouteTableAttachPublicSubnet4:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Has4thAZ
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetAZ4
+  RouteTableAttachPublicSubnet5:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Has5thAZ
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetAZ5
+  RouteTableAttachPublicSubnet6:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Has6thAZ
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetAZ6
+  RouteTableAttachPublicSubnet7:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Has7thAZ
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetAZ7
+  RouteTableAttachPublicSubnet8:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Has8thAZ
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetAZ8
+  RouteTableAttachPublicSubnet9:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Has9thAZ
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetAZ9
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    DependsOn: IPv6Block
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateRouteTable1
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateRouteIPv6AZ1:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationIpv6CidrBlock: '::/0'
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyGateway
+      RouteTableId: !Ref PrivateRouteTable1
+  RouteTableAttachPrivateSubnet1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnetAZ1
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Condition: Has2ndAZ
+    DependsOn: IPv6Block
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateRouteTable2
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateRouteIPv6AZ2:
+    Type: AWS::EC2::Route
+    Condition: Has2ndAZ
+    Properties:
+      DestinationIpv6CidrBlock: '::/0'
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyGateway
+      RouteTableId: !Ref PrivateRouteTable2
+  RouteTableAttachPrivateSubnet2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Has2ndAZ
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref PrivateSubnetAZ2
+  PrivateRouteTable3:
+    Type: AWS::EC2::RouteTable
+    Condition: Has3rdAZ
+    DependsOn: IPv6Block
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateRouteTable3
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateRouteIPv6AZ3:
+    Type: AWS::EC2::Route
+    Condition: Has3rdAZ
+    Properties:
+      DestinationIpv6CidrBlock: '::/0'
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyGateway
+      RouteTableId: !Ref PrivateRouteTable3
+  RouteTableAttachPrivateSubnet3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Has3rdAZ
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable3
+      SubnetId: !Ref PrivateSubnetAZ3
+  PrivateRouteTable4:
+    Type: AWS::EC2::RouteTable
+    Condition: Has4thAZ
+    DependsOn: IPv6Block
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateRouteTable4
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateRouteIPv6AZ4:
+    Type: AWS::EC2::Route
+    Condition: Has4thAZ
+    Properties:
+      DestinationIpv6CidrBlock: '::/0'
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyGateway
+      RouteTableId: !Ref PrivateRouteTable4
+  RouteTableAttachPrivateSubnet4:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Has4thAZ
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable4
+      SubnetId: !Ref PrivateSubnetAZ4
+  PrivateRouteTable5:
+    Type: AWS::EC2::RouteTable
+    Condition: Has5thAZ
+    DependsOn: IPv6Block
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateRouteTable5
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateRouteIPv6AZ5:
+    Type: AWS::EC2::Route
+    Condition: Has5thAZ
+    Properties:
+      DestinationIpv6CidrBlock: '::/0'
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyGateway
+      RouteTableId: !Ref PrivateRouteTable5
+  RouteTableAttachPrivateSubnet5:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Has5thAZ
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable5
+      SubnetId: !Ref PrivateSubnetAZ5
+  PrivateRouteTable6:
+    Type: AWS::EC2::RouteTable
+    Condition: Has6thAZ
+    DependsOn: IPv6Block
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateRouteTable6
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateRouteIPv6AZ6:
+    Type: AWS::EC2::Route
+    Condition: Has6thAZ
+    Properties:
+      DestinationIpv6CidrBlock: '::/0'
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyGateway
+      RouteTableId: !Ref PrivateRouteTable6
+  RouteTableAttachPrivateSubnet6:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Has6thAZ
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable6
+      SubnetId: !Ref PrivateSubnetAZ6
+  PrivateRouteTable7:
+    Type: AWS::EC2::RouteTable
+    Condition: Has7thAZ
+    DependsOn: IPv6Block
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateRouteTable7
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateRouteIPv6AZ7:
+    Type: AWS::EC2::Route
+    Condition: Has7thAZ
+    Properties:
+      DestinationIpv6CidrBlock: '::/0'
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyGateway
+      RouteTableId: !Ref PrivateRouteTable7
+  RouteTableAttachPrivateSubnet7:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Has7thAZ
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable7
+      SubnetId: !Ref PrivateSubnetAZ7
+  PrivateRouteTable8:
+    Type: AWS::EC2::RouteTable
+    Condition: Has8thAZ
+    DependsOn: IPv6Block
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateRouteTable8
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateRouteIPv6AZ8:
+    Type: AWS::EC2::Route
+    Condition: Has8thAZ
+    Properties:
+      DestinationIpv6CidrBlock: '::/0'
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyGateway
+      RouteTableId: !Ref PrivateRouteTable8
+  RouteTableAttachPrivateSubnet8:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Has8thAZ
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable8
+      SubnetId: !Ref PrivateSubnetAZ8
+  PrivateRouteTable9:
+    Type: AWS::EC2::RouteTable
+    Condition: Has9thAZ
+    DependsOn: IPv6Block
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        -
+          Key: Name
+          Value: !Join
+            - '-'
+            - -
+                Fn::If:
+                  - HasCostTag
+                  - !Ref CostTagName
+                  - !Ref AWS::StackName
+              - PrivateRouteTable9
+        -
+          Key: CostTag
+          Value:
+            Fn::If:
+              - HasCostTag
+              - !Ref CostTagName
+              - !Ref AWS::StackName
+  PrivateRouteIPv6AZ9:
+    Type: AWS::EC2::Route
+    Condition: Has9thAZ
+    Properties:
+      DestinationIpv6CidrBlock: '::/0'
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyGateway
+      RouteTableId: !Ref PrivateRouteTable9
+  RouteTableAttachPrivateSubnet9:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Has9thAZ
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable9
+      SubnetId: !Ref PrivateSubnetAZ9
+Outputs:
+  VpcId:
+    Value: !Ref Vpc
+    Description: VPC ID
+    Export:
+      Name: !Join
+        - ':'
+        - - !Ref AWS::StackName
+          - VpcId
+  PublicSubnets:
+    Value: !Join
+      - ','
+      - - !Ref PublicSubnetAZ1
+        -
+          Fn::If:
+            - Has2ndAZ
+            - !Ref PublicSubnetAZ2
+            - !Ref AWS::NoValue
+        -
+          Fn::If:
+            - Has3rdAZ
+            - !Ref PublicSubnetAZ3
+            - !Ref AWS::NoValue
+        -
+          Fn::If:
+            - Has4thAZ
+            - !Ref PublicSubnetAZ4
+            - !Ref AWS::NoValue
+        -
+          Fn::If:
+            - Has5thAZ
+            - !Ref PublicSubnetAZ5
+            - !Ref AWS::NoValue
+        -
+          Fn::If:
+            - Has6thAZ
+            - !Ref PublicSubnetAZ6
+            - !Ref AWS::NoValue
+        -
+          Fn::If:
+            - Has7thAZ
+            - !Ref PublicSubnetAZ7
+            - !Ref AWS::NoValue
+        -
+          Fn::If:
+            - Has8thAZ
+            - !Ref PublicSubnetAZ8
+            - !Ref AWS::NoValue
+        -
+          Fn::If:
+            - Has9thAZ
+            - !Ref PublicSubnetAZ9
+            - !Ref AWS::NoValue
+    Description: Public subnets
+    Export:
+      Name: !Join
+        - ':'
+        - - !Ref AWS::StackName
+          - PublicSubnets
+  PrivateSubnets:
+    Value: !Join
+      - ','
+      - - !Ref PrivateSubnetAZ1
+        -
+          Fn::If:
+            - Has2ndAZ
+            - !Ref PrivateSubnetAZ2
+            - !Ref AWS::NoValue
+        -
+          Fn::If:
+            - Has3rdAZ
+            - !Ref PrivateSubnetAZ3
+            - !Ref AWS::NoValue
+        -
+          Fn::If:
+            - Has4thAZ
+            - !Ref PrivateSubnetAZ4
+            - !Ref AWS::NoValue
+        -
+          Fn::If:
+            - Has5thAZ
+            - !Ref PrivateSubnetAZ5
+            - !Ref AWS::NoValue
+        -
+          Fn::If:
+            - Has6thAZ
+            - !Ref PrivateSubnetAZ6
+            - !Ref AWS::NoValue
+        -
+          Fn::If:
+            - Has7thAZ
+            - !Ref PrivateSubnetAZ7
+            - !Ref AWS::NoValue
+        -
+          Fn::If:
+            - Has8thAZ
+            - !Ref PrivateSubnetAZ8
+            - !Ref AWS::NoValue
+        -
+          Fn::If:
+            - Has9thAZ
+            - !Ref PrivateSubnetAZ9
+            - !Ref AWS::NoValue
+    Description: Public subnets
+    Export:
+      Name: !Join
+        - ':'
+        - - !Ref AWS::StackName
+          - PrivateSubnets
